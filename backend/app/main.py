@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import os
 
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -65,6 +66,46 @@ async def parse_invoice(supplier: str = Form("auto"), file: UploadFile = File(..
         raise HTTPException(status_code=422, detail=f"Kon factuur niet parsen: {exc}") from exc
 
     return result.to_json()
+
+
+class ParseBase64Request(BaseModel):
+    content_base64: str
+    supplier: str = "auto"
+    filename: str | None = None
+
+
+@app.post("/parse-base64")
+async def parse_invoice_base64(payload: ParseBase64Request) -> dict:
+    """Zelfde als /parse, maar met de PDF als base64 in een JSON-body.
+
+    Nodig voor n8n: de httpRequest-helper in een Code-node stuurt 'formData'
+    niet betrouwbaar als echte multipart door (FastAPI ziet het file-veld dan
+    als ontbrekend). Dat is in de Ordervergelijker al eerder tegen het lijf
+    gelopen bij de PDF-upload; JSON+base64 werkt daar wel, dus hier meteen zo.
+    """
+    try:
+        pdf_bytes = base64.b64decode(payload.content_base64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Ongeldige base64-inhoud: {exc}") from exc
+
+    if payload.supplier == "auto":
+        result = detect_and_parse(pdf_bytes)
+        if result is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Geen bekende leveranciers-layout herkend in deze factuur.",
+            )
+        return result.to_json()
+
+    parser = get_parser(payload.supplier)
+    if parser is None:
+        raise HTTPException(
+            status_code=400, detail=f"Geen parser voor leverancier '{payload.supplier}'."
+        )
+    try:
+        return parser.parse(pdf_bytes).to_json()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=422, detail=f"Kon factuur niet parsen: {exc}") from exc
 
 
 class SourceLinePayload(BaseModel):
