@@ -25,7 +25,11 @@ from .base import BaseInvoiceParser, ParsedInvoiceLine, ParsedInvoiceResult, Par
 # regel) - die worden aan de vorige regel geplakt. FREIGHT CHARGES-regels
 # hebben geen bedrag en worden overgeslagen (net als bij orderbevestigingen).
 
-_REFERENCE_RE = re.compile(r"^Uw referentie:\s*(\S+)\s*$")
+_REFERENCE_RE = re.compile(r"^Uw referentie:\s*(.+?)\s*$")
+# Alleen een echt I-nummer is bruikbaar om te koppelen. Staat er vrije tekst
+# ("Offerte showroom najaarscollectie"), dan hoort de factuur alsnog in de
+# tool - maar dan als niet-gekoppeld, voor handmatige controle.
+_PURCHASE_ORDER_NUMBER_RE = re.compile(r"^I\d{6,}$")
 _INVOICE_HEADER_RE = re.compile(r"^(\d{1,2}-\d{1,2}-\d{4})\s+(\d+)\s+\d+\s*$")
 # Regel met bedragen: [ordernr] artikelnr aantal omschrijving landcode kortingsperc% prijs totaal
 _LINE_ITEM_RE = re.compile(
@@ -125,20 +129,38 @@ class LightLivingInvoiceParser(BaseInvoiceParser):
             if lines:
                 lines[-1].description = f"{lines[-1].description} {line}".strip()
 
-        if not reference:
-            warnings.append("Geen 'Uw referentie' (I-nummer) gevonden in de factuur.")
+        # Alleen een echt I-nummer is bruikbaar om te koppelen. Staat er vrije
+        # tekst (bv. "Offerte showroom najaarscollectie" bij een showroom-
+        # inkoop), dan is er geen inkooporder om tegen te vergelijken - de
+        # factuur moet dan tóch in de tool komen, als niet-gekoppeld, zodat
+        # facturatie hem ziet in plaats van dat hij stil verdwijnt.
+        order_key_value = None
+        if reference and _PURCHASE_ORDER_NUMBER_RE.match(reference):
+            order_key_value = reference
+        elif reference:
+            warnings.append(
+                f"Referentie '{reference}' is geen inkoopordernummer - "
+                "factuur kan niet automatisch gekoppeld worden."
+            )
+        else:
+            warnings.append("Geen 'Uw referentie' gevonden in de factuur.")
+
         if not lines:
             warnings.append("Geen productregels gevonden in de factuur.")
 
+        # De layout is herkend zodra er productregels uit de tabel komen; dat
+        # is wat deze factuur tot een Light & Living-factuur maakt, niet de
+        # aanwezigheid van een bruikbaar ordernummer.
         sections = (
             [
                 ParsedInvoiceSection(
                     order_key_type="purchase_order_number",
-                    order_key_value=reference,
+                    order_key_value=order_key_value,
                     lines=lines,
+                    reference=reference,
                 )
             ]
-            if reference
+            if lines
             else []
         )
 
@@ -148,5 +170,5 @@ class LightLivingInvoiceParser(BaseInvoiceParser):
             invoice_date=invoice_date,
             sections=sections,
             warnings=warnings,
-            confidence=0.9 if reference and lines else 0.2,
+            confidence=0.9 if order_key_value and lines else (0.6 if lines else 0.2),
         )

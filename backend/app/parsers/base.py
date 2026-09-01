@@ -17,10 +17,16 @@ class ParsedInvoiceLine:
 class ParsedInvoiceSection:
     """Een deel van de factuur dat bij precies 1 inkooporder hoort. Bij een
     losse factuur is er 1 sectie voor het hele document; bij een
-    verzamelfactuur (Room108, Hjort) is er 1 sectie per inkooporder."""
+    verzamelfactuur (Room108, Hjort) is er 1 sectie per inkooporder.
+
+    order_key_value mag None zijn: sommige facturen dragen helemaal geen
+    ordernummer (bv. een showroom-inkoop met alleen vrije tekst als
+    referentie). Zo'n factuur wordt tóch teruggegeven, zodat hij zichtbaar in
+    de handmatige wachtrij belandt in plaats van stilletjes te verdwijnen.
+    """
 
     order_key_type: Literal["purchase_order_number", "external_order_number"]
-    order_key_value: str
+    order_key_value: str | None
     lines: list[ParsedInvoiceLine] = field(default_factory=list)
     reference: str | None = None
 
