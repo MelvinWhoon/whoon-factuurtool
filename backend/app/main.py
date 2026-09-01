@@ -6,7 +6,7 @@ from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadF
 from pydantic import BaseModel
 
 from .matching import SourceLine, match_invoice_lines_to_source
-from .parsers.registry import get_parser, list_suppliers
+from .parsers.registry import detect_and_parse, get_parser, list_suppliers
 
 # Zelfde patroon als whoon-ordertool/pdf_parser/api.py: een simpele, statische
 # X-API-Key. Bewust geen database-toegang hier (net als het bestaande
@@ -37,12 +37,28 @@ async def suppliers() -> dict:
 
 
 @app.post("/parse")
-async def parse_invoice(supplier: str = Form(...), file: UploadFile = File(...)) -> dict:
+async def parse_invoice(supplier: str = Form("auto"), file: UploadFile = File(...)) -> dict:
+    """supplier='auto' (default) laat de service zelf bepalen welke leverancier
+    het is - nodig voor de gedeelde mailbox invoice@whoon.com, waar de afzender
+    niets zegt over de leverancier."""
+    pdf_bytes = await file.read()
+
+    if supplier == "auto":
+        try:
+            result = detect_and_parse(pdf_bytes)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=422, detail=f"Kon factuur niet parsen: {exc}") from exc
+        if result is None:
+            raise HTTPException(
+                status_code=422,
+                detail="Geen bekende leveranciers-layout herkend in deze factuur.",
+            )
+        return result.to_json()
+
     parser = get_parser(supplier)
     if parser is None:
         raise HTTPException(status_code=400, detail=f"Geen parser voor leverancier '{supplier}'.")
 
-    pdf_bytes = await file.read()
     try:
         result = parser.parse(pdf_bytes)
     except Exception as exc:  # noqa: BLE001 - altijd een nette 422 i.p.v. een crash
