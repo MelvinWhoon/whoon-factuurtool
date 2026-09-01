@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
+import { Navigate, Route, Routes } from 'react-router-dom';
 import { APP_TITLE, MAIN_APP_LOGIN_URL } from './config';
 import { fetchUserRole } from './api';
+import InvoicePage from './pages/InvoicePage';
+import InvoicesPage from './pages/InvoicesPage';
 import { supabase } from './supabaseClient';
 
 // Minimaal scaffold (fase 1 van het plan): bevestigt dat deze losstaande app
@@ -75,50 +78,61 @@ export default function App() {
     await supabase.auth.signOut();
   }
 
+  // Alles behalve de ingelogde admin-route valt terug op één klein kaartje:
+  // deze app heeft bewust geen eigen login-/MFA-scherm (dat doet de
+  // Ordervergelijker op hetzelfde domein, de sessie wordt gedeeld).
+  function renderGate(message, action) {
+    return (
+      <main className="min-h-screen bg-gradient-to-b from-slate-100 to-slate-50 px-4 py-6 text-slate-900 sm:px-6">
+        <div className="mx-auto mt-16 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-700">
+          <h1 className="text-lg font-bold text-slate-900">Facturen</h1>
+          <p className="mt-3">{message}</p>
+          {action}
+        </div>
+      </main>
+    );
+  }
+
+  if (loadingSession) return renderGate('Sessie laden…');
+
+  if (!session) {
+    return renderGate(
+      'Je bent niet ingelogd.',
+      <a
+        className="mt-3 inline-flex rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
+        href={MAIN_APP_LOGIN_URL}
+      >
+        Naar inloggen (Order Vergelijker)
+      </a>
+    );
+  }
+
+  if (loadingRole) return renderGate('Toegang controleren…');
+
+  if (userRole !== 'admin') {
+    return renderGate(
+      'Geen toegang. Deze tool is nog niet beschikbaar voor jouw account.',
+      <button
+        className="mt-3 inline-flex rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
+        type="button"
+        onClick={handleSignOut}
+      >
+        Uitloggen
+      </button>
+    );
+  }
+
+  const sharedProps = {
+    userEmail: session.user.email || '',
+    userId: session.user.id,
+    onSignOut: handleSignOut,
+  };
+
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-100 to-slate-50 px-4 py-6 text-slate-900 sm:px-6">
-      <div className="mx-auto mt-16 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 text-sm text-slate-700">
-        <h1 className="text-lg font-bold text-slate-900">Facturen</h1>
-
-        {loadingSession && <p className="mt-3">Sessie laden…</p>}
-
-        {!loadingSession && !session && (
-          <div className="mt-3 space-y-3">
-            <p>Je bent niet ingelogd.</p>
-            <a
-              className="inline-flex rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
-              href={MAIN_APP_LOGIN_URL}
-            >
-              Naar inloggen (Order Vergelijker)
-            </a>
-          </div>
-        )}
-
-        {!loadingSession && session && loadingRole && <p className="mt-3">Toegang controleren…</p>}
-
-        {!loadingSession && session && !loadingRole && userRole !== 'admin' && (
-          <div className="mt-3 space-y-3">
-            <p>Geen toegang. Deze tool is nog niet beschikbaar voor jouw account.</p>
-            <button
-              className="inline-flex rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700"
-              type="button"
-              onClick={handleSignOut}
-            >
-              Uitloggen
-            </button>
-          </div>
-        )}
-
-        {!loadingSession && session && !loadingRole && userRole === 'admin' && (
-          <div className="mt-3 space-y-1">
-            <p>Ingelogd als {session.user.email}.</p>
-            <p className="text-slate-500">
-              Deze factuur-tool wordt binnenkort gebouwd — losstaand van de
-              Ordervergelijker, met een gedeelde database.
-            </p>
-          </div>
-        )}
-      </div>
-    </main>
+    <Routes>
+      <Route path="/" element={<InvoicesPage {...sharedProps} />} />
+      <Route path="/:id" element={<InvoicePage {...sharedProps} />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
