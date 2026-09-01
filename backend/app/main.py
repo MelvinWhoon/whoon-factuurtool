@@ -3,8 +3,13 @@ from __future__ import annotations
 import base64
 import os
 
+import httpx
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, UploadFile
 from pydantic import BaseModel
+
+# Bucket waarin de factuur-PDFs terechtkomen; dezelfde als de Ordervergelijker
+# gebruikt, met de prefix 'invoices/' erbinnen.
+STORAGE_BUCKET = os.getenv("SUPPLIER_PDF_BUCKET", "supplier-pdfs")
 
 from .matching import SourceLine, match_invoice_lines_to_source
 from .parsers.registry import detect_and_parse, get_parser, list_suppliers
@@ -106,6 +111,65 @@ async def parse_invoice_base64(payload: ParseBase64Request) -> dict:
         return parser.parse(pdf_bytes).to_json()
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=422, detail=f"Kon factuur niet parsen: {exc}") from exc
+
+
+class StorePdfRequest(BaseModel):
+    content_base64: str
+    path: str  # pad binnen de bucket, bv. 'invoices/gusj_GF2600502.pdf'
+
+
+@app.post("/store-pdf")
+async def store_pdf(payload: StorePdfRequest) -> dict:
+    """Zet een PDF in de Supabase-storagebucket.
+
+    Waarom hier en niet rechtstreeks vanuit n8n: de httpRequest-helper in een
+    n8n Code-node serialiseert een Buffer altijd als JSON
+    ({"type":"Buffer","data":[...]}) in plaats van ruwe bytes te sturen - met
+    json:false en encoding:null getest, alle varianten schrijven hetzelfde
+    kapotte bestand weg. Base64 over JSON naar deze service werkt wel, net als
+    bij /parse-base64.
+    """
+    supabase_url = os.getenv("SUPABASE_URL")
+    service_role = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+    if not supabase_url or not service_role:
+        raise HTTPException(
+            status_code=500,
+            detail="SUPABASE_URL of SUPABASE_SERVICE_ROLE_KEY niet gezet op de server.",
+        )
+
+    try:
+        pdf_bytes = base64.b64decode(payload.content_base64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Ongeldige base64-inhoud: {exc}") from exc
+
+    # Nooit buiten de bucket kunnen schrijven, ook niet als de aanroeper een
+    # pad met '..' of een leidende slash meestuurt.
+    clean_path = payload.path.strip().lstrip("/")
+    if ".." in clean_path or not clean_path:
+        raise HTTPException(status_code=400, detail=f"Ongeldig pad: {payload.path!r}")
+
+    url = f"{supabase_url.rstrip('/')}/storage/v1/object/{STORAGE_BUCKET}/{clean_path}"
+    async with httpx.AsyncClient(timeout=120) as client:
+        response = await client.post(
+            url,
+            content=pdf_bytes,
+            headers={
+                "Authorization": f"Bearer {service_role}",
+                "x-upsert": "true",
+                "Content-Type": "application/pdf",
+            },
+        )
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Opslaan mislukt ({response.status_code}): {response.text[:300]}",
+        )
+
+    return {
+        "storageKey": f"{STORAGE_BUCKET}/{clean_path}",
+        "bytes": len(pdf_bytes),
+    }
 
 
 class SourceLinePayload(BaseModel):

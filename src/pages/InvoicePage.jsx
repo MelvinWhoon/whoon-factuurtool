@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { fetchInvoice, updateInvoiceChecked } from '../api';
 import AppHeader from '../components/AppHeader';
+import InvoicePdf from '../components/InvoicePdf';
 import StatusBadge from '../components/StatusBadge';
 import StatusBox from '../components/StatusBox';
 
@@ -121,6 +122,8 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
                 </ul>
               )}
             </section>
+
+            <InvoicePdf storageKey={data.invoice.supplier_pdf_storage_key} />
 
             {groups.map((group) => {
               const groupTotal = group.lines.reduce((sum, l) => sum + (Number(l.line_price) || 0), 0);

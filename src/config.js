@@ -15,6 +15,10 @@ export const TENANTS_SCHEMA_NAME_COLUMN =
 
 export const DEFAULT_SCHEMA = import.meta.env.VITE_DEFAULT_SCHEMA || 'whoon';
 
+// Zelfde bucket als de Ordervergelijker gebruikt; factuur-PDFs staan daar
+// onder de prefix 'invoices/'.
+export const SUPPLIER_PDF_BUCKET = import.meta.env.VITE_SUPPLIER_PDF_BUCKET || 'supplier-pdfs';
+
 // Pad waarachter deze app in Vercel wordt geproxied (zie vercel.json-rewrite
 // in whoon-ordertool). Nodig voor de React Router basename.
 export const BASE_PATH = '/facturen';
