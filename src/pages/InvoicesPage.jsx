@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { fetchInvoices } from '../api';
 import AppHeader from '../components/AppHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -25,11 +25,25 @@ function formatDate(value) {
   return new Intl.DateTimeFormat('nl-NL', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
 
+function formatMonthLabel(key) {
+  const [year, month] = String(key).split('-');
+  if (!year || !month) return key;
+  return new Intl.DateTimeFormat('nl-NL', { month: 'long', year: 'numeric' }).format(
+    new Date(Date.UTC(Number(year), Number(month) - 1, 1))
+  );
+}
+
 export default function InvoicesPage({ userEmail, onSignOut }) {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [filter, setFilter] = useState('all');
+  // Filter/leverancier/maand starten vanuit de URL, zodat een klik vanuit de
+  // Analyse-pagina hier meteen het juiste subset toont.
+  const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
+  const [supplierFilter, setSupplierFilter] = useState(searchParams.get('supplier') || 'all');
+  const [monthFilter, setMonthFilter] = useState(searchParams.get('month') || 'all');
+  const [search, setSearch] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -63,11 +77,52 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
     return result;
   }, [invoices]);
 
+  const suppliers = useMemo(
+    () => Array.from(new Set(invoices.map((i) => i.supplier))).sort(),
+    [invoices]
+  );
+  const months = useMemo(
+    () =>
+      Array.from(new Set(invoices.filter((i) => i.invoice_date).map((i) => String(i.invoice_date).slice(0, 7))))
+        .sort()
+        .reverse(),
+    [invoices]
+  );
+
+  // Filters, leverancier/maand en zoekterm zijn onafhankelijk van elkaar en
+  // stapelen op - zo werkt een klik vanuit Analyse (leverancier + filter)
+  // en kan de gebruiker daarna nog verder zoeken.
   const filtered = useMemo(() => {
-    if (filter === 'all') return invoices;
-    if (filter === 'todo') return invoices.filter((i) => i.checked === null || i.checked === undefined);
-    return invoices.filter((i) => i.status.key === filter);
-  }, [invoices, filter]);
+    let result = invoices;
+    if (filter === 'todo') result = result.filter((i) => i.checked === null || i.checked === undefined);
+    else if (filter !== 'all') result = result.filter((i) => i.status.key === filter);
+
+    if (supplierFilter !== 'all') result = result.filter((i) => i.supplier === supplierFilter);
+    if (monthFilter !== 'all') {
+      result = result.filter((i) => i.invoice_date && String(i.invoice_date).slice(0, 7) === monthFilter);
+    }
+
+    const term = search.trim().toLowerCase();
+    if (term) {
+      result = result.filter((i) => {
+        const haystack = [i.invoice_number, i.supplier, ...(i.orderNumbers || [])]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(term);
+      });
+    }
+    return result;
+  }, [invoices, filter, supplierFilter, monthFilter, search]);
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (filter !== 'all') next.set('filter', filter);
+    if (supplierFilter !== 'all') next.set('supplier', supplierFilter);
+    if (monthFilter !== 'all') next.set('month', monthFilter);
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filter, supplierFilter, monthFilter]);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-slate-100 to-slate-50 px-4 py-6 text-slate-900 sm:px-6">
@@ -104,11 +159,60 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
               ))}
             </div>
 
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-slate-700"
+                value={supplierFilter}
+                onChange={(e) => setSupplierFilter(e.target.value)}
+              >
+                <option value="all">Alle leveranciers</option>
+                {suppliers.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <select
+                className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-slate-700"
+                value={monthFilter}
+                onChange={(e) => setMonthFilter(e.target.value)}
+              >
+                <option value="all">Alle maanden</option>
+                {months.map((m) => (
+                  <option key={m} value={m}>
+                    {formatMonthLabel(m)}
+                  </option>
+                ))}
+              </select>
+              <input
+                className="min-w-[200px] flex-1 rounded-md border border-slate-300 px-2.5 py-1.5 text-slate-700 placeholder:text-slate-400"
+                type="search"
+                placeholder="Zoek op factuur- of ordernummer…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {(supplierFilter !== 'all' || monthFilter !== 'all' || search) && (
+                <button
+                  className="rounded-md px-2.5 py-1.5 font-medium text-slate-500 underline decoration-slate-300 underline-offset-2 hover:text-slate-800"
+                  type="button"
+                  onClick={() => {
+                    setSupplierFilter('all');
+                    setMonthFilter('all');
+                    setSearch('');
+                  }}
+                >
+                  Wis leverancier/maand/zoekterm
+                </button>
+              )}
+            </div>
+
             {invoices.length === 0 ? (
               <StatusBox>
                 Nog geen facturen verwerkt. Zodra de intake-workflow draait, verschijnen ze hier
                 automatisch.
               </StatusBox>
+            ) : filtered.length === 0 ? (
+              <StatusBox>Geen facturen gevonden voor deze filters.</StatusBox>
             ) : (
               <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                 <table className="w-full min-w-[720px] text-sm">

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { APP_TITLE, MAIN_APP_LOGIN_URL } from './config';
 import { fetchUserRole } from './api';
+import AnalysisPage from './pages/AnalysisPage';
 import InvoicePage from './pages/InvoicePage';
 import InvoicesPage from './pages/InvoicesPage';
 import { supabase } from './supabaseClient';
@@ -131,6 +132,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<InvoicesPage {...sharedProps} />} />
+      <Route path="/analyse" element={<AnalysisPage {...sharedProps} />} />
       <Route path="/:id" element={<InvoicePage {...sharedProps} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

@@ -90,6 +90,7 @@ export async function fetchInvoices(schemaName = DEFAULT_SCHEMA) {
       ...invoice,
       lineCount: lines.length,
       orderCount: orderNumbers.size,
+      orderNumbers: Array.from(orderNumbers),
       totalAmount: lines.reduce((sum, l) => sum + (Number(l.line_price) || 0), 0),
       status: deriveInvoiceStatus(invoice, lines),
     };
@@ -122,4 +123,126 @@ export async function updateInvoiceChecked(invoiceId, checked, userId, schemaNam
     .eq('id', invoiceId);
 
   if (error) throw new Error(error.message || 'Kon het oordeel niet opslaan.');
+}
+
+/** Vrij notitieveld per factuur (bv. "gebeld met leverancier"). */
+export async function updateInvoiceNotes(invoiceId, notes, schemaName = DEFAULT_SCHEMA) {
+  const { error } = await invoicesQuery(schemaName)
+    .update({ notes: notes || null })
+    .eq('id', invoiceId);
+
+  if (error) throw new Error(error.message || 'Kon de notitie niet opslaan.');
+}
+
+/** Probeert nog niet gekoppelde regels alsnog te koppelen aan de inkooporder.
+ * Puur lezend richting LogicTrade: whoon.purchase_orders is de eigen,
+ * periodiek gesynchroniseerde kopie - er wordt nooit rechtstreeks in
+ * LogicTrade zelf geschreven of gezocht. Nuttig omdat facturen per definitie
+ * ná de levering binnenkomen, dus de order kan bij intake nog ontbreken. */
+export async function relinkInvoiceLines(invoiceId, schemaName = DEFAULT_SCHEMA) {
+  const { data, error } = await supabase
+    .schema(schemaName)
+    .rpc('relink_invoice_lines', { p_invoice_id: invoiceId });
+
+  if (error) throw new Error(error.message || 'Kon niet opnieuw koppelen.');
+  return data;
+}
+
+/** Aggregaties voor de Analyse-pagina: per leverancier, per maand en de
+ * grootste prijsafwijkingen. Client-side berekend uit dezelfde twee tabellen
+ * als fetchInvoices - bij deze aantallen (facturen, geen orderregels-schaal)
+ * is een aparte database-view nog niet nodig. */
+export async function fetchAnalytics(schemaName = DEFAULT_SCHEMA) {
+  const { data: invoices, error } = await invoicesQuery(schemaName)
+    .select('id, supplier, invoice_number, invoice_date, checked')
+    .order('invoice_date', { ascending: false })
+    .limit(2000);
+  if (error) throw new Error(error.message || 'Kon facturen niet laden.');
+
+  const { data: lines, error: linesError } = await invoiceLinesQuery(schemaName)
+    .select(
+      'purchase_invoice_id, purchase_order_number, description, match_status, price_within_tolerance, line_price, source_line_price, price_difference'
+    )
+    .limit(20000);
+  if (linesError) throw new Error(linesError.message || 'Kon factuurregels niet laden.');
+
+  const invoiceById = new Map((invoices || []).map((i) => [i.id, i]));
+  const linesByInvoice = new Map();
+  for (const line of lines || []) {
+    const list = linesByInvoice.get(line.purchase_invoice_id) || [];
+    list.push(line);
+    linesByInvoice.set(line.purchase_invoice_id, list);
+  }
+
+  const perSupplierMap = new Map();
+  const byMonthMap = new Map();
+  let totalTodo = 0;
+  let totalWithPriceIssue = 0;
+  let totalOvercharge = 0;
+
+  for (const invoice of invoices || []) {
+    const invoiceLines = linesByInvoice.get(invoice.id) || [];
+    const status = deriveInvoiceStatus(invoice, invoiceLines);
+    const amount = invoiceLines.reduce((sum, l) => sum + (Number(l.line_price) || 0), 0);
+    const overcharge = invoiceLines
+      .filter((l) => l.match_status === 'matched' && l.price_within_tolerance === false)
+      .reduce((sum, l) => sum + Math.max(0, Number(l.price_difference) || 0), 0);
+
+    if (invoice.checked === null || invoice.checked === undefined) totalTodo += 1;
+    if (status.key === 'price') totalWithPriceIssue += 1;
+    totalOvercharge += overcharge;
+
+    const supplierRow = perSupplierMap.get(invoice.supplier) || {
+      supplier: invoice.supplier,
+      invoices: 0,
+      totalAmount: 0,
+      priceIssueInvoices: 0,
+      unlinkedInvoices: 0,
+      overcharge: 0,
+    };
+    supplierRow.invoices += 1;
+    supplierRow.totalAmount += amount;
+    if (status.key === 'price') supplierRow.priceIssueInvoices += 1;
+    if (status.key === 'unlinked') supplierRow.unlinkedInvoices += 1;
+    supplierRow.overcharge += overcharge;
+    perSupplierMap.set(invoice.supplier, supplierRow);
+
+    if (invoice.invoice_date) {
+      const month = String(invoice.invoice_date).slice(0, 7);
+      const monthRow = byMonthMap.get(month) || { month, invoices: 0, totalAmount: 0 };
+      monthRow.invoices += 1;
+      monthRow.totalAmount += amount;
+      byMonthMap.set(month, monthRow);
+    }
+  }
+
+  const topOvercharges = (lines || [])
+    .filter((l) => l.match_status === 'matched' && l.price_within_tolerance === false)
+    .map((l) => {
+      const invoice = invoiceById.get(l.purchase_invoice_id);
+      return {
+        id: `${l.purchase_invoice_id}-${l.purchase_order_number || ''}-${l.description || ''}`,
+        invoiceId: l.purchase_invoice_id,
+        invoiceNumber: invoice?.invoice_number,
+        supplier: invoice?.supplier || '-',
+        description: l.description || '-',
+        sourceLinePrice: l.source_line_price,
+        linePrice: l.line_price,
+        priceDifference: Number(l.price_difference) || 0,
+      };
+    })
+    .sort((a, b) => b.priceDifference - a.priceDifference)
+    .slice(0, 10);
+
+  return {
+    totals: {
+      invoices: (invoices || []).length,
+      todo: totalTodo,
+      withPriceIssue: totalWithPriceIssue,
+      overchargeAmount: totalOvercharge,
+    },
+    perSupplier: Array.from(perSupplierMap.values()).sort((a, b) => b.invoices - a.invoices),
+    byMonth: Array.from(byMonthMap.values()).sort((a, b) => a.month.localeCompare(b.month)),
+    topOvercharges,
+  };
 }

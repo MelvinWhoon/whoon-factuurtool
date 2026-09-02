@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { fetchInvoice, updateInvoiceChecked } from '../api';
+import { fetchInvoice, relinkInvoiceLines, updateInvoiceChecked, updateInvoiceNotes } from '../api';
 import AppHeader from '../components/AppHeader';
 import InvoicePdf from '../components/InvoicePdf';
 import StatusBadge from '../components/StatusBadge';
@@ -25,6 +25,11 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const [notesSavedAt, setNotesSavedAt] = useState(0);
+  const [relinking, setRelinking] = useState(false);
+  const [relinkMessage, setRelinkMessage] = useState('');
 
   useEffect(() => {
     let mounted = true;
@@ -33,7 +38,10 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
 
     fetchInvoice(id)
       .then((result) => {
-        if (mounted) setData(result);
+        if (mounted) {
+          setData(result);
+          setNotes(result.invoice.notes || '');
+        }
       })
       .catch((err) => {
         if (mounted) setError(err.message || 'Kon factuur niet laden.');
@@ -46,6 +54,42 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
       mounted = false;
     };
   }, [id]);
+
+  async function handleSaveNotes() {
+    setNotesSaving(true);
+    setError('');
+    try {
+      await updateInvoiceNotes(id, notes);
+      setNotesSavedAt(Date.now());
+    } catch (err) {
+      setError(err.message || 'Kon de notitie niet opslaan.');
+    } finally {
+      setNotesSaving(false);
+    }
+  }
+
+  async function handleRelink() {
+    setRelinking(true);
+    setError('');
+    setRelinkMessage('');
+    try {
+      const result = await relinkInvoiceLines(id);
+      const fresh = await fetchInvoice(id);
+      setData(fresh);
+      setNotes(fresh.invoice.notes || '');
+      const orderLinked = result?.orderLinked || 0;
+      const lineMatched = result?.lineMatched || 0;
+      setRelinkMessage(
+        orderLinked === 0
+          ? 'De inkooporder(s) staan nog niet in onze database — waarschijnlijk nog niet gesynchroniseerd vanuit LogicTrade. Probeer het later opnieuw.'
+          : `${orderLinked} regel(s) gekoppeld aan de inkooporder, waarvan ${lineMatched} ook aan een orderregel.`
+      );
+    } catch (err) {
+      setError(err.message || 'Kon niet opnieuw koppelen.');
+    } finally {
+      setRelinking(false);
+    }
+  }
 
   // Regels groeperen per inkooporder: bij een verzamelfactuur (Room108, Hjort)
   // levert dit meerdere blokken op, bij een losse factuur precies één.
@@ -121,9 +165,49 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
                   )}
                 </ul>
               )}
+
+              {data.status.unmatched > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-md bg-slate-50 px-3 py-2">
+                  <p className="text-xs text-slate-500">
+                    Facturen komen altijd ná de levering binnen — het is normaal dat de inkooporder er
+                    bij intake nog niet stond. Probeer het opnieuw zodra deze is gesynchroniseerd.
+                  </p>
+                  <button
+                    className="ml-auto inline-flex shrink-0 rounded-md bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-100 disabled:opacity-50"
+                    type="button"
+                    disabled={relinking}
+                    onClick={handleRelink}
+                  >
+                    {relinking ? 'Bezig…' : 'Opnieuw proberen te koppelen'}
+                  </button>
+                </div>
+              )}
+              {relinkMessage && <p className="mt-2 text-xs text-slate-600">{relinkMessage}</p>}
             </section>
 
             <InvoicePdf storageKey={data.invoice.supplier_pdf_storage_key} />
+
+            <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-semibold text-slate-700">Notitie</p>
+                <button
+                  className="inline-flex rounded-md bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:opacity-50"
+                  type="button"
+                  disabled={notesSaving}
+                  onClick={handleSaveNotes}
+                >
+                  {notesSaving ? 'Opslaan…' : 'Opslaan'}
+                </button>
+              </div>
+              <textarea
+                className="mt-2 w-full rounded-md border border-slate-300 px-3 py-2 text-sm text-slate-700"
+                rows={2}
+                placeholder="Bv. gebeld met leverancier, wacht op creditnota…"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+              {notesSavedAt > 0 && <p className="mt-1 text-xs text-emerald-700">Opgeslagen.</p>}
+            </section>
 
             {groups.map((group) => {
               const groupTotal = group.lines.reduce((sum, l) => sum + (Number(l.line_price) || 0), 0);

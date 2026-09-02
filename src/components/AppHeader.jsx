@@ -3,9 +3,14 @@ import { Link } from 'react-router-dom';
 export default function AppHeader({ userEmail, onSignOut }) {
   return (
     <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-      <Link className="text-2xl font-bold tracking-tight hover:text-slate-700" to="/">
-        Facturen
-      </Link>
+      <div className="flex flex-wrap items-baseline gap-4">
+        <Link className="text-2xl font-bold tracking-tight hover:text-slate-700" to="/">
+          Facturen
+        </Link>
+        <Link className="text-sm font-medium text-slate-500 hover:text-slate-800" to="/analyse">
+          Analyse
+        </Link>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2 text-xs">
         {/* Terug naar de hoofd-tool: gewone <a>, want dat is een andere
