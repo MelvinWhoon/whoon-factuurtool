@@ -98,7 +98,7 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
     const byOrder = new Map();
     for (const line of data.lines) {
       const key = line.purchase_order_number || line.external_order_number || '(niet gekoppeld)';
-      const group = byOrder.get(key) || { orderKey: key, lines: [] };
+      const group = byOrder.get(key) || { orderKey: key, lines: [], salesOrderNumber: line.sales_order_number };
       group.lines.push(line);
       byOrder.set(key, group);
     }
@@ -221,9 +221,17 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
                   className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white"
                 >
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-2.5">
-                    <p className="text-sm font-semibold text-slate-800">
-                      Inkooporder {group.orderKey}
-                    </p>
+                    <div>
+                      <p className="text-sm font-semibold text-slate-800">
+                        Inkooporder {group.orderKey}
+                      </p>
+                      {group.salesOrderNumber && (
+                        <p className="text-xs text-slate-500">
+                          Verkooporder {group.salesOrderNumber} — op te zoeken in LogicTrade als de
+                          koppeling hierboven niet lukt.
+                        </p>
+                      )}
+                    </div>
                     <p className="text-xs text-slate-500">
                       Factuur {formatMoney(groupTotal)} · inkooporder {formatMoney(sourceTotal)}
                     </p>

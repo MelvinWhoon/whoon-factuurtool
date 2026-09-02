@@ -67,7 +67,7 @@ export async function fetchInvoices(schemaName = DEFAULT_SCHEMA) {
   // Regels in één keer ophalen voor alle facturen op deze pagina, i.p.v. een
   // query per factuur (N+1). Alleen de velden die de lijst nodig heeft.
   const { data: lineRows, error: linesError } = await invoiceLinesQuery(schemaName)
-    .select('purchase_invoice_id, purchase_order_number, external_order_number, match_status, price_within_tolerance, line_price')
+    .select('purchase_invoice_id, purchase_order_number, external_order_number, sales_order_number, match_status, price_within_tolerance, line_price')
     .in('purchase_invoice_id', invoices.map((i) => i.id));
 
   if (linesError) throw new Error(linesError.message || 'Kon factuurregels niet laden.');
@@ -86,11 +86,17 @@ export async function fetchInvoices(schemaName = DEFAULT_SCHEMA) {
         .map((l) => l.purchase_order_number || l.external_order_number)
         .filter((value) => Boolean(value))
     );
+    // Los van orderCount (aantal inkooporders): het V-nummer telt niet mee
+    // als aparte order, maar moet wel doorzoekbaar zijn.
+    const searchNumbers = new Set([
+      ...orderNumbers,
+      ...lines.map((l) => l.sales_order_number).filter(Boolean),
+    ]);
     return {
       ...invoice,
       lineCount: lines.length,
       orderCount: orderNumbers.size,
-      orderNumbers: Array.from(orderNumbers),
+      orderNumbers: Array.from(searchNumbers),
       totalAmount: lines.reduce((sum, l) => sum + (Number(l.line_price) || 0), 0),
       status: deriveInvoiceStatus(invoice, lines),
     };
