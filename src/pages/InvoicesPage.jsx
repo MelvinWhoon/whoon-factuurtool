@@ -8,6 +8,7 @@ import StatusBox from '../components/StatusBox';
 const FILTERS = [
   { key: 'all', label: 'Alle' },
   { key: 'todo', label: 'Te beoordelen' },
+  { key: 'empty', label: 'Fout (geen regels)' },
   { key: 'price', label: 'Prijsafwijking' },
   { key: 'unlinked', label: 'Niet gekoppeld' },
   { key: 'checked', label: 'In orde' },
@@ -67,9 +68,10 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
   }, []);
 
   const counts = useMemo(() => {
-    const result = { all: invoices.length, todo: 0, price: 0, unlinked: 0, checked: 0 };
+    const result = { all: invoices.length, todo: 0, empty: 0, price: 0, unlinked: 0, checked: 0 };
     for (const invoice of invoices) {
       if (invoice.checked === null || invoice.checked === undefined) result.todo += 1;
+      if (invoice.status.key === 'empty') result.empty += 1;
       if (invoice.status.key === 'price') result.price += 1;
       if (invoice.status.key === 'unlinked') result.unlinked += 1;
       if (invoice.status.key === 'checked') result.checked += 1;

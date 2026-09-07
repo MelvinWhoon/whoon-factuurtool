@@ -4,6 +4,7 @@ const STYLES = {
   unlinked: 'border-slate-300 bg-slate-100 text-slate-700',
   price: 'border-amber-300 bg-amber-100 text-amber-800',
   ok: 'border-sky-300 bg-sky-100 text-sky-800',
+  empty: 'border-red-300 bg-red-100 text-red-800',
 };
 
 export default function StatusBadge({ status }) {

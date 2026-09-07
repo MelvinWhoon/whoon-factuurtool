@@ -47,6 +47,11 @@ export function deriveInvoiceStatus(invoice, lines) {
   if (invoice.checked === true) return { key: 'checked', label: 'In orde', unmatched, outOfTolerance };
   if (invoice.checked === false)
     return { key: 'rejected', label: 'Niet in orde', unmatched, outOfTolerance };
+  // Geen enkele regel: nooit "Klopt" - dat verbergt een intake-fout (parsen
+  // mislukt, opslaan mislukt) achter een groen label. Vooral bij
+  // verzamelfacturen kwam dit voor: 1 kapotte sectie liet de hele factuur
+  // zonder regels achter terwijl de kop wel was opgeslagen.
+  if (relevant.length === 0) return { key: 'empty', label: 'Geen regels', unmatched, outOfTolerance };
   if (unmatched > 0)
     return { key: 'unlinked', label: 'Niet gekoppeld', unmatched, outOfTolerance };
   if (outOfTolerance > 0)
