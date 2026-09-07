@@ -5,6 +5,7 @@ import { fetchUserRole } from './api';
 import AnalysisPage from './pages/AnalysisPage';
 import InvoicePage from './pages/InvoicePage';
 import InvoicesPage from './pages/InvoicesPage';
+import TriagePage from './pages/TriagePage';
 import { supabase } from './supabaseClient';
 
 // Minimaal scaffold (fase 1 van het plan): bevestigt dat deze losstaande app
@@ -133,6 +134,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<InvoicesPage {...sharedProps} />} />
       <Route path="/analyse" element={<AnalysisPage {...sharedProps} />} />
+      <Route path="/classificeren" element={<TriagePage {...sharedProps} />} />
       <Route path="/:id" element={<InvoicePage {...sharedProps} />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

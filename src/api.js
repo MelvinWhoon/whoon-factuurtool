@@ -60,8 +60,12 @@ export function deriveInvoiceStatus(invoice, lines) {
 }
 
 export async function fetchInvoices(schemaName = DEFAULT_SCHEMA) {
+  // Niet-herkende facturen die nog niet getriageerd zijn ("Te classificeren")
+  // of expliciet als niet-LogicTrade-relevant afgewezen zijn, horen niet in
+  // dit overzicht - die staan in het triage-tabje resp. nergens meer.
   const { data, error } = await invoicesQuery(schemaName)
     .select('id, supplier, invoice_number, invoice_date, checked, checked_by, created_at')
+    .or('recognized.eq.true,logictrade_relevant.eq.true')
     .order('created_at', { ascending: false })
     .limit(500);
 
@@ -143,6 +147,32 @@ export async function updateInvoiceNotes(invoiceId, notes, schemaName = DEFAULT_
     .eq('id', invoiceId);
 
   if (error) throw new Error(error.message || 'Kon de notitie niet opslaan.');
+}
+
+/** Facturen die niet als bekende leverancier herkend zijn en nog niet
+ * getriageerd zijn - horen ze uberhaupt in LogicTrade thuis (bv. Cookiebot,
+ * Google Ads, nutsfacturen horen er nooit in) of niet? */
+export async function fetchUnclassifiedInvoices(schemaName = DEFAULT_SCHEMA) {
+  const { data, error } = await invoicesQuery(schemaName)
+    .select('id, invoice_date, supplier_pdf_storage_key, email_meta, created_at')
+    .eq('recognized', false)
+    .is('logictrade_relevant', null)
+    .order('created_at', { ascending: false })
+    .limit(200);
+
+  if (error) throw new Error(error.message || 'Kon te classificeren facturen niet laden.');
+  return data || [];
+}
+
+/** Legt de triage-keuze vast: true = hoort in LogicTrade (verschijnt in het
+ * hoofdoverzicht om alsnog te koppelen), false = hoort er nooit in thuis
+ * (voorgoed verborgen). */
+export async function updateInvoiceLogictradeRelevant(invoiceId, relevant, schemaName = DEFAULT_SCHEMA) {
+  const { error } = await invoicesQuery(schemaName)
+    .update({ logictrade_relevant: relevant })
+    .eq('id', invoiceId);
+
+  if (error) throw new Error(error.message || 'Kon de keuze niet opslaan.');
 }
 
 /** Probeert nog niet gekoppelde regels alsnog te koppelen aan de inkooporder.
