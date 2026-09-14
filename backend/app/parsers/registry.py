@@ -28,18 +28,38 @@ _TOTAL_LABEL_RE = re.compile(
 # generieke patronen als whoon-ordertool/pdf_parser gebruikt.
 _PURCHASE_ORDER_NUMBER_RE = re.compile(r"\bI\d{6,}\b")
 _SALES_ORDER_NUMBER_RE = re.compile(r"\bV\d{6,}\b")
-# Factuurnummer/-datum: bij By-Boo en Karpi bv. "Factuurnummer : 82614154" /
-# "Factuurdatum : 11-09-2026". Zonder dit label kwam elke generiek-herkende
-# factuur zonder nummer/datum in de tool terecht ("(geen nummer)"), ook al
-# stond het gewoon leesbaar op de PDF.
-_INVOICE_NUMBER_RE = re.compile(
-    r"(?:factuurnummer|invoice\s*(?:number|no)\.?)\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-/]*)",
-    re.IGNORECASE,
-)
-_INVOICE_DATE_RE = re.compile(
-    r"(?:factuurdatum|invoice\s*date)\s*:?\s*(\d{1,2})[-/](\d{1,2})[-/](\d{4})",
-    re.IGNORECASE,
-)
+# Factuurnummer/-datum. Twee layouts komen voor:
+#   A) "Factuurnummer : 82614154" (By-Boo, Karpi) - waarde direct na het label.
+#   B) "Debiteurnummer Factuurnummer\n07589 00281419" (Eurogros) - kolomkoppen
+#      op de ene regel, waarden op dezelfde kolompositie op de volgende regel.
+# Vorm B werd eerst fout gelezen: een simpele "label -> eerstvolgende woord"
+# regex pakte dan het woord ONDER de vorige kolomkop (hier het debiteurnummer
+# "07589", niet het factuurnummer "00281419") omdat dat toevallig het eerste
+# woord ná "Factuurnummer" in de tekststroom is.
+_INVOICE_NUMBER_LABEL_RE = re.compile(r"factuurnummer|invoice\s*(?:number|no)\.?", re.IGNORECASE)
+_INVOICE_DATE_LABEL_RE = re.compile(r"factuurdatum|invoice\s*date", re.IGNORECASE)
+
+
+def _extract_labeled_value(text: str, label_re: "re.Pattern[str]") -> str | None:
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        match = label_re.search(line)
+        if not match:
+            continue
+        rest = line[match.end() :]
+        colon_match = re.match(r"\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-/]*)", rest)
+        # Vorm A: geldt alleen als er op deze regel na het label meteen een
+        # scheidingsteken en/of waarde volgt (niet louter het einde van de regel).
+        if colon_match and rest.strip():
+            return colon_match.group(1)
+        # Vorm B: tel de woordpositie van het label op deze regel en pak het
+        # woord op diezelfde positie op de eerstvolgende regel.
+        col_index = len(line[: match.start()].split())
+        if i + 1 < len(lines):
+            next_words = lines[i + 1].split()
+            if col_index < len(next_words):
+                return next_words[col_index]
+    return None
 
 
 def _parse_generic_amount(raw: str) -> float | None:
@@ -72,15 +92,19 @@ def _generic_fallback_parse(pdf_bytes: bytes) -> ParsedInvoiceResult | None:
     po_numbers = list(dict.fromkeys(_PURCHASE_ORDER_NUMBER_RE.findall(text)))
     sales_numbers = list(dict.fromkeys(_SALES_ORDER_NUMBER_RE.findall(text)))
 
-    invoice_number = None
-    match = _INVOICE_NUMBER_RE.search(text)
-    if match:
-        invoice_number = match.group(1).strip()
+    invoice_number = _extract_labeled_value(text, _INVOICE_NUMBER_LABEL_RE)
 
+    # Datum: alleen Vorm A (colon/waarde direct achter het label). Vorm B
+    # (kolomkop) is voor een datum niet betrouwbaar positioneel te vinden -
+    # een voorafgaande kolom kan zelf meerdere woorden bevatten (bv. een naam
+    # "Vertegenwoordiger: Hans van den Noort"), waardoor de kolompositie van
+    # latere kolommen verschuift. Liever geen datum dan een verkeerde datum.
     invoice_date = None
-    match = _INVOICE_DATE_RE.search(text)
-    if match:
-        day, month, year = match.groups()
+    date_match = re.search(
+        r"(?:factuurdatum|invoice\s*date)\s*:\s*(\d{1,2})[-/](\d{1,2})[-/](\d{4})", text, re.IGNORECASE
+    )
+    if date_match:
+        day, month, year = date_match.groups()
         invoice_date = f"{year}-{int(month):02d}-{int(day):02d}"
 
     if total_amount is None and not po_numbers and not sales_numbers and not invoice_number:
