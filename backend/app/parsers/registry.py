@@ -28,6 +28,18 @@ _TOTAL_LABEL_RE = re.compile(
 # generieke patronen als whoon-ordertool/pdf_parser gebruikt.
 _PURCHASE_ORDER_NUMBER_RE = re.compile(r"\bI\d{6,}\b")
 _SALES_ORDER_NUMBER_RE = re.compile(r"\bV\d{6,}\b")
+# Factuurnummer/-datum: bij By-Boo en Karpi bv. "Factuurnummer : 82614154" /
+# "Factuurdatum : 11-09-2026". Zonder dit label kwam elke generiek-herkende
+# factuur zonder nummer/datum in de tool terecht ("(geen nummer)"), ook al
+# stond het gewoon leesbaar op de PDF.
+_INVOICE_NUMBER_RE = re.compile(
+    r"(?:factuurnummer|invoice\s*(?:number|no)\.?)\s*:?\s*([A-Za-z0-9][A-Za-z0-9\-/]*)",
+    re.IGNORECASE,
+)
+_INVOICE_DATE_RE = re.compile(
+    r"(?:factuurdatum|invoice\s*date)\s*:?\s*(\d{1,2})[-/](\d{1,2})[-/](\d{4})",
+    re.IGNORECASE,
+)
 
 
 def _parse_generic_amount(raw: str) -> float | None:
@@ -60,7 +72,18 @@ def _generic_fallback_parse(pdf_bytes: bytes) -> ParsedInvoiceResult | None:
     po_numbers = list(dict.fromkeys(_PURCHASE_ORDER_NUMBER_RE.findall(text)))
     sales_numbers = list(dict.fromkeys(_SALES_ORDER_NUMBER_RE.findall(text)))
 
-    if total_amount is None and not po_numbers and not sales_numbers:
+    invoice_number = None
+    match = _INVOICE_NUMBER_RE.search(text)
+    if match:
+        invoice_number = match.group(1).strip()
+
+    invoice_date = None
+    match = _INVOICE_DATE_RE.search(text)
+    if match:
+        day, month, year = match.groups()
+        invoice_date = f"{year}-{int(month):02d}-{int(day):02d}"
+
+    if total_amount is None and not po_numbers and not sales_numbers and not invoice_number:
         return None  # niets bruikbaars gevonden, echt geen basis om op te bouwen
 
     sections: list[ParsedInvoiceSection] = []
@@ -106,8 +129,8 @@ def _generic_fallback_parse(pdf_bytes: bytes) -> ParsedInvoiceResult | None:
     warnings = ["Generieke herkenning: regels zijn niet uitgesplitst, alleen totaalbedrag/referenties."]
     return ParsedInvoiceResult(
         supplier="onbekend",
-        invoice_number=None,
-        invoice_date=None,
+        invoice_number=invoice_number,
+        invoice_date=invoice_date,
         sections=sections,
         warnings=warnings,
         confidence=0.1,

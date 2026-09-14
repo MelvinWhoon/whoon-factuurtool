@@ -73,7 +73,7 @@ export async function fetchInvoices(schemaName = DEFAULT_SCHEMA) {
   // dit overzicht - die staan in het triage-tabje resp. nergens meer.
   const { data, error } = await invoicesQuery(schemaName)
     .select(
-      'id, supplier, invoice_number, invoice_date, checked, checked_by, created_at, printed_total_amount, total_within_tolerance, supplier_match_method'
+      'id, supplier, invoice_number, invoice_date, checked, checked_by, created_at, printed_total_amount, total_within_tolerance, supplier_match_method, email_meta'
     )
     .or('recognized.eq.true,logictrade_relevant.eq.true')
     .order('created_at', { ascending: false })

@@ -300,6 +300,18 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
                           <Link className="hover:underline" to={`/${invoice.id}`}>
                             {invoice.invoice_number || '(geen nummer)'}
                           </Link>
+                          {invoice.email_meta?.webLink && (
+                            <a
+                              className="ml-1.5 text-xs text-sky-600 hover:text-sky-800"
+                              href={String(invoice.email_meta.webLink)}
+                              target="_blank"
+                              rel="noreferrer"
+                              title="Open oorspronkelijke e-mail in Outlook"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              ✉
+                            </a>
+                          )}
                         </td>
                         <td className="px-4 py-2.5">{invoice.supplier}</td>
                         <td className="px-4 py-2.5">{formatDate(invoice.invoice_date)}</td>

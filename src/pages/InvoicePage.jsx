@@ -145,6 +145,16 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
                     Factuurdatum {formatDate(data.invoice.invoice_date)} · {groups.length}{' '}
                     {groups.length === 1 ? 'inkooporder' : 'inkooporders'} · {data.lines.length} regels
                   </p>
+                  {data.invoice.email_meta?.webLink && (
+                    <a
+                      className="mt-1 inline-flex items-center text-xs text-sky-700 underline hover:text-sky-900"
+                      href={String(data.invoice.email_meta.webLink)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open oorspronkelijke e-mail in Outlook
+                    </a>
+                  )}
                 </div>
                 <StatusBadge status={data.status} />
               </div>
