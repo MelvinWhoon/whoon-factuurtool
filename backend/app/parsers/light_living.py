@@ -52,6 +52,9 @@ _TABLE_END_RE = re.compile(r"(Transport naar volgende pagina|Subtotaal|Kortings|
 # factuur (goedkeur-audittrail, geen onderdeel van de factuur van de
 # leverancier zelf) - alles daarna nooit als factuurregel meenemen.
 _DOCUMENT_TIJDLIJN_RE = re.compile(r"^Document tijdlijn")
+# Printed eindtotaal - expliciet NIET "subtotaal" (dat is een per-pagina
+# tussenstand, geen betrouwbare basis voor de totaalbedrag-vergelijking).
+_TOTAL_RE = re.compile(r"(?<!sub)(?:totaal(?:bedrag)?)[^\d\-]{0,20}(-?[\d.,]+)", re.IGNORECASE)
 
 
 def _parse_nl_money(raw: str) -> float:
@@ -148,6 +151,15 @@ class LightLivingInvoiceParser(BaseInvoiceParser):
         if not lines:
             warnings.append("Geen productregels gevonden in de factuur.")
 
+        # Totaalbedrag: alleen zoeken vóór de eventuele Basecone-audittrail
+        # (anders kan een bedrag daaruit per ongeluk als "totaal" tellen).
+        tijdlijn_idx = next(
+            (i for i, raw in enumerate(lines_text) if _DOCUMENT_TIJDLIJN_RE.match(raw.strip())), len(lines_text)
+        )
+        total_amount = None
+        for match in _TOTAL_RE.finditer("\n".join(lines_text[:tijdlijn_idx])):
+            total_amount = _parse_nl_money(match.group(1))
+
         # De layout is herkend zodra er productregels uit de tabel komen; dat
         # is wat deze factuur tot een Light & Living-factuur maakt, niet de
         # aanwezigheid van een bruikbaar ordernummer.
@@ -171,4 +183,5 @@ class LightLivingInvoiceParser(BaseInvoiceParser):
             sections=sections,
             warnings=warnings,
             confidence=0.9 if order_key_value and lines else (0.6 if lines else 0.2),
+            total_amount=total_amount,
         )

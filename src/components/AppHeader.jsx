@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchUnclassifiedInvoices } from '../api';
+import { fetchAmountMatchPendingCount, fetchUnclassifiedInvoices } from '../api';
 
 export default function AppHeader({ userEmail, onSignOut }) {
   const [unclassifiedCount, setUnclassifiedCount] = useState(0);
+  const [amountMatchPendingCount, setAmountMatchPendingCount] = useState(0);
 
   useEffect(() => {
     let mounted = true;
@@ -14,6 +15,11 @@ export default function AppHeader({ userEmail, onSignOut }) {
       .catch(() => {
         // stil falen - dit is alleen een telbadge, geen kritieke data
       });
+    fetchAmountMatchPendingCount()
+      .then((count) => {
+        if (mounted) setAmountMatchPendingCount(count);
+      })
+      .catch(() => {});
     return () => {
       mounted = false;
     };
@@ -24,6 +30,11 @@ export default function AppHeader({ userEmail, onSignOut }) {
       <div className="flex flex-wrap items-baseline gap-4">
         <Link className="text-2xl font-bold tracking-tight hover:text-slate-700" to="/">
           Facturen
+          {amountMatchPendingCount > 0 && (
+            <span className="ml-1.5 inline-flex rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold text-violet-800">
+              {amountMatchPendingCount}
+            </span>
+          )}
         </Link>
         <Link className="text-sm font-medium text-slate-500 hover:text-slate-800" to="/analyse">
           Analyse

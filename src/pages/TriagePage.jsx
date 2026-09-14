@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { fetchUnclassifiedInvoices, updateInvoiceLogictradeRelevant } from '../api';
+import { fetchUnclassifiedInvoices, markSenderDomainIrrelevant, updateInvoiceLogictradeRelevant } from '../api';
 import AppHeader from '../components/AppHeader';
 import InvoicePdf from '../components/InvoicePdf';
 import StatusBox from '../components/StatusBox';
@@ -12,7 +12,7 @@ function formatDate(value) {
   return new Intl.DateTimeFormat('nl-NL', { year: 'numeric', month: '2-digit', day: '2-digit' }).format(date);
 }
 
-export default function TriagePage({ userEmail, onSignOut }) {
+export default function TriagePage({ userEmail, userId, onSignOut }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -32,12 +32,18 @@ export default function TriagePage({ userEmail, onSignOut }) {
     load();
   }, []);
 
-  async function handleChoice(id, relevant) {
-    setBusyId(id);
+  async function handleChoice(invoice, relevant) {
+    setBusyId(invoice.id);
     setError('');
     try {
-      await updateInvoiceLogictradeRelevant(id, relevant);
-      setInvoices((prev) => prev.filter((i) => i.id !== id));
+      await updateInvoiceLogictradeRelevant(invoice.id, relevant);
+      // Bij "niet relevant" ook het afzenderdomein onthouden: toekomstige mail
+      // van hetzelfde domein wordt dan door de intake-workflow vanzelf
+      // overgeslagen, zonder dat dit tabblad daar nog een keer voor nodig is.
+      if (relevant === false) {
+        await markSenderDomainIrrelevant(invoice.id, invoice.email_meta?.from, userId);
+      }
+      setInvoices((prev) => prev.filter((i) => i.id !== invoice.id));
     } catch (err) {
       setError(err.message || 'Kon de keuze niet opslaan.');
     } finally {
@@ -61,7 +67,9 @@ export default function TriagePage({ userEmail, onSignOut }) {
           <p className="mt-2 text-sm text-slate-500">
             Facturen die niet als bekende leverancier herkend zijn (bv. Cookiebot, Google Ads,
             nutsfacturen). Geef per factuur aan of hij ooit tegen een inkooporder in LogicTrade
-            gelegd moet worden.
+            gelegd moet worden. <strong>"Geen LogicTrade vergelijking mogelijk"</strong> onthoudt ook
+            het afzenderdomein: toekomstige mail van datzelfde domein wordt daarna automatisch
+            overgeslagen en komt hier niet meer terug.
           </p>
         </section>
 
@@ -101,7 +109,7 @@ export default function TriagePage({ userEmail, onSignOut }) {
                       className="inline-flex rounded-md bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-300 transition hover:bg-slate-50 disabled:opacity-50"
                       type="button"
                       disabled={busyId === invoice.id}
-                      onClick={() => handleChoice(invoice.id, false)}
+                      onClick={() => handleChoice(invoice, false)}
                     >
                       Geen LogicTrade vergelijking mogelijk
                     </button>
@@ -109,7 +117,7 @@ export default function TriagePage({ userEmail, onSignOut }) {
                       className="inline-flex rounded-md bg-slate-900 px-2.5 py-1.5 text-xs font-medium text-white transition hover:bg-slate-700 disabled:opacity-50"
                       type="button"
                       disabled={busyId === invoice.id}
-                      onClick={() => handleChoice(invoice.id, true)}
+                      onClick={() => handleChoice(invoice, true)}
                     >
                       Wel LogicTrade koppeling mogelijk
                     </button>

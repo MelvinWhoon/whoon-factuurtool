@@ -5,6 +5,9 @@ const STYLES = {
   price: 'border-amber-300 bg-amber-100 text-amber-800',
   ok: 'border-sky-300 bg-sky-100 text-sky-800',
   empty: 'border-red-300 bg-red-100 text-red-800',
+  // Bewust géén groen (checked) - dit betekent "klaar voor jouw klik", niet
+  // "al goedgekeurd". Violet is elders in de status-set nog niet gebruikt.
+  amount_match_pending: 'border-violet-300 bg-violet-100 text-violet-800',
 };
 
 export default function StatusBadge({ status }) {

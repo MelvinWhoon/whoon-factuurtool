@@ -185,6 +185,40 @@ export default function InvoicePage({ userEmail, userId, onSignOut }) {
               {relinkMessage && <p className="mt-2 text-xs text-slate-600">{relinkMessage}</p>}
             </section>
 
+            {/* Totaalbedrag is leidend (zie deriveInvoiceStatus): klopt het,
+                dan is de factuur klaar voor een bevestigingsklik - maar die
+                klik blijft altijd aan een mens, nooit automatisch. */}
+            {data.invoice.total_within_tolerance === true &&
+              (data.invoice.checked === null || data.invoice.checked === undefined) && (
+                <section className="mt-4 rounded-xl border border-violet-300 bg-violet-50 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-semibold text-violet-900">
+                        Totaalbedrag klopt met de inkooporder(s)
+                      </p>
+                      <ul className="mt-1 space-y-0.5 text-xs text-violet-800">
+                        {(data.invoice.total_compare_meta?.groups || [])
+                          .filter((g) => g.linked)
+                          .map((g) => (
+                            <li key={g.purchaseOrderNumber}>
+                              {g.purchaseOrderNumber}: factuur {formatMoney(g.invoiceTotal)} vs.
+                              inkooporder {formatMoney(g.sourceTotal)}
+                            </li>
+                          ))}
+                      </ul>
+                    </div>
+                    <button
+                      className="inline-flex shrink-0 rounded-md bg-violet-700 px-4 py-2 text-sm font-medium text-white transition hover:bg-violet-800 disabled:opacity-50"
+                      type="button"
+                      disabled={saving}
+                      onClick={() => handleSetChecked(true)}
+                    >
+                      Bevestigen — In orde
+                    </button>
+                  </div>
+                </section>
+              )}
+
             <InvoicePdf storageKey={data.invoice.supplier_pdf_storage_key} />
 
             <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4">

@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { fetchInvoices } from '../api';
+import { fetchInvoices, fetchUnclassifiedInvoices } from '../api';
 import AppHeader from '../components/AppHeader';
 import StatusBadge from '../components/StatusBadge';
 import StatusBox from '../components/StatusBox';
 
+// 'amount_match_pending' als eerste chip ná "Alle": dit is de de-facto
+// standaard-werklijst - facturen die klaar zijn voor één bevestigingsklik.
 const FILTERS = [
   { key: 'all', label: 'Alle' },
+  { key: 'amount_match_pending', label: 'Klaar om te bevestigen' },
   { key: 'todo', label: 'Te beoordelen' },
   { key: 'empty', label: 'Fout (geen regels)' },
   { key: 'price', label: 'Prijsafwijking' },
@@ -39,6 +42,7 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
   const [invoices, setInvoices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [triageCount, setTriageCount] = useState(0);
   // Filter/leverancier/maand starten vanuit de URL, zodat een klik vanuit de
   // Analyse-pagina hier meteen het juiste subset toont.
   const [filter, setFilter] = useState(searchParams.get('filter') || 'all');
@@ -62,19 +66,36 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
         if (mounted) setLoading(false);
       });
 
+    // Los, stil-falend gehaald (net als de badge in AppHeader) - dit is puur
+    // een telling voor de dashboardtegel, geen kritieke data.
+    fetchUnclassifiedInvoices()
+      .then((rows) => {
+        if (mounted) setTriageCount(rows.length);
+      })
+      .catch(() => {});
+
     return () => {
       mounted = false;
     };
   }, []);
 
   const counts = useMemo(() => {
-    const result = { all: invoices.length, todo: 0, empty: 0, price: 0, unlinked: 0, checked: 0 };
+    const result = {
+      all: invoices.length,
+      todo: 0,
+      empty: 0,
+      price: 0,
+      unlinked: 0,
+      checked: 0,
+      amount_match_pending: 0,
+    };
     for (const invoice of invoices) {
       if (invoice.checked === null || invoice.checked === undefined) result.todo += 1;
       if (invoice.status.key === 'empty') result.empty += 1;
       if (invoice.status.key === 'price') result.price += 1;
       if (invoice.status.key === 'unlinked') result.unlinked += 1;
       if (invoice.status.key === 'checked') result.checked += 1;
+      if (invoice.status.key === 'amount_match_pending') result.amount_match_pending += 1;
     }
     return result;
   }, [invoices]);
@@ -143,6 +164,44 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
 
         {!loading && !error && (
           <div className="mt-5 space-y-3">
+            {/* Samenvattingstegels: in één oogopslag wat er te doen is, geen
+                filters hoeven uit te proberen. Elke tegel is gewoon een
+                snelkoppeling naar dezelfde filter-state als de chips
+                hieronder - geen aparte databevraging nodig. */}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <button
+                type="button"
+                className="rounded-xl border border-violet-300 bg-violet-50 p-4 text-left transition hover:bg-violet-100"
+                onClick={() => setFilter('amount_match_pending')}
+              >
+                <p className="text-2xl font-bold text-violet-900">{counts.amount_match_pending}</p>
+                <p className="mt-1 text-xs font-medium text-violet-800">Klaar om te bevestigen</p>
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-left transition hover:bg-amber-100"
+                onClick={() => setFilter('price')}
+              >
+                <p className="text-2xl font-bold text-amber-900">{counts.price}</p>
+                <p className="mt-1 text-xs font-medium text-amber-800">Prijsafwijking</p>
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-300 bg-slate-50 p-4 text-left transition hover:bg-slate-100"
+                onClick={() => setFilter('unlinked')}
+              >
+                <p className="text-2xl font-bold text-slate-800">{counts.unlinked}</p>
+                <p className="mt-1 text-xs font-medium text-slate-600">Niet gekoppeld</p>
+              </button>
+              <Link
+                to="/classificeren"
+                className="rounded-xl border border-sky-300 bg-sky-50 p-4 text-left transition hover:bg-sky-100"
+              >
+                <p className="text-2xl font-bold text-sky-900">{triageCount}</p>
+                <p className="mt-1 text-xs font-medium text-sky-800">In triage</p>
+              </Link>
+            </div>
+
             <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs">
               <span className="font-medium text-slate-700">Filters</span>
               {FILTERS.map((option) => (
@@ -246,7 +305,13 @@ export default function InvoicesPage({ userEmail, onSignOut }) {
                         <td className="px-4 py-2.5">{formatDate(invoice.invoice_date)}</td>
                         <td className="px-4 py-2.5">{invoice.orderCount}</td>
                         <td className="px-4 py-2.5">{invoice.lineCount}</td>
-                        <td className="px-4 py-2.5">{formatMoney(invoice.totalAmount)}</td>
+                        <td className="px-4 py-2.5">
+                          {formatMoney(
+                            invoice.printed_total_amount !== null && invoice.printed_total_amount !== undefined
+                              ? invoice.printed_total_amount
+                              : invoice.totalAmount
+                          )}
+                        </td>
                         <td className="px-4 py-2.5">
                           <StatusBadge status={invoice.status} />
                         </td>

@@ -47,6 +47,14 @@ export function deriveInvoiceStatus(invoice, lines) {
   if (invoice.checked === true) return { key: 'checked', label: 'In orde', unmatched, outOfTolerance };
   if (invoice.checked === false)
     return { key: 'rejected', label: 'Niet in orde', unmatched, outOfTolerance };
+  // Totaalbedrag is leidend: klopt het totaal (whoon.relink_invoice_lines,
+  // whoon.purchase_invoices.total_within_tolerance) dan is de factuur klaar
+  // voor een bevestigingsklik, ook als een individuele regel op zichzelf nog
+  // als "niet gekoppeld"/"prijsafwijking" zou tellen - per-regel blijft
+  // zichtbaar als toelichting op de detailpagina, bepaalt hier niet meer het
+  // hoofdoordeel. Nooit automatisch "in orde": een mens moet nog klikken.
+  if (invoice.total_within_tolerance === true)
+    return { key: 'amount_match_pending', label: 'Totaal klopt - bevestigen', unmatched, outOfTolerance };
   // Geen enkele regel: nooit "Klopt" - dat verbergt een intake-fout (parsen
   // mislukt, opslaan mislukt) achter een groen label. Vooral bij
   // verzamelfacturen kwam dit voor: 1 kapotte sectie liet de hele factuur
@@ -64,7 +72,9 @@ export async function fetchInvoices(schemaName = DEFAULT_SCHEMA) {
   // of expliciet als niet-LogicTrade-relevant afgewezen zijn, horen niet in
   // dit overzicht - die staan in het triage-tabje resp. nergens meer.
   const { data, error } = await invoicesQuery(schemaName)
-    .select('id, supplier, invoice_number, invoice_date, checked, checked_by, created_at')
+    .select(
+      'id, supplier, invoice_number, invoice_date, checked, checked_by, created_at, printed_total_amount, total_within_tolerance, supplier_match_method'
+    )
     .or('recognized.eq.true,logictrade_relevant.eq.true')
     .order('created_at', { ascending: false })
     .limit(500);
@@ -149,6 +159,20 @@ export async function updateInvoiceNotes(invoiceId, notes, schemaName = DEFAULT_
   if (error) throw new Error(error.message || 'Kon de notitie niet opslaan.');
 }
 
+/** Telling voor de navigatiebadge: facturen die klaar staan voor één
+ * bevestigingsklik (totaalbedrag klopt, nog niet beoordeeld). Losse, lichte
+ * query (alleen een count) i.p.v. fetchInvoices() hergebruiken - dat haalt
+ * ook alle regels op, wat voor een badge onnodig zwaar is. */
+export async function fetchAmountMatchPendingCount(schemaName = DEFAULT_SCHEMA) {
+  const { count, error } = await invoicesQuery(schemaName)
+    .select('id', { count: 'exact', head: true })
+    .is('checked', null)
+    .eq('total_within_tolerance', true);
+
+  if (error) return 0; // badge-telling: stil falen, geen kritieke data
+  return count || 0;
+}
+
 /** Facturen die niet als bekende leverancier herkend zijn en nog niet
  * getriageerd zijn - horen ze uberhaupt in LogicTrade thuis (bv. Cookiebot,
  * Google Ads, nutsfacturen horen er nooit in) of niet? */
@@ -166,13 +190,42 @@ export async function fetchUnclassifiedInvoices(schemaName = DEFAULT_SCHEMA) {
 
 /** Legt de triage-keuze vast: true = hoort in LogicTrade (verschijnt in het
  * hoofdoverzicht om alsnog te koppelen), false = hoort er nooit in thuis
- * (voorgoed verborgen). */
+ * (voorgoed verborgen). Altijd 'human' als bron - dit wordt alleen aangeroepen
+ * vanuit een expliciete klik op de Classificeren-pagina; de automatische
+ * varianten ('auto_denylist'/'auto_known_supplier') worden alleen door de
+ * intake-workflow gezet. */
 export async function updateInvoiceLogictradeRelevant(invoiceId, relevant, schemaName = DEFAULT_SCHEMA) {
   const { error } = await invoicesQuery(schemaName)
-    .update({ logictrade_relevant: relevant })
+    .update({ logictrade_relevant: relevant, logictrade_relevant_source: 'human' })
     .eq('id', invoiceId);
 
   if (error) throw new Error(error.message || 'Kon de keuze niet opslaan.');
+}
+
+function senderDomainOf(address) {
+  const match = String(address || '').trim().toLowerCase().match(/@([^@]+)$/);
+  return match ? match[1] : null;
+}
+
+/** Voegt het afzenderdomein van deze factuur toe aan de deny-lijst
+ * (whoon.irrelevant_invoice_senders): toekomstige mail van hetzelfde domein
+ * wordt door de intake-workflow voortaan automatisch als niet-relevant
+ * bestempeld, zonder dat een mens er nog naar hoeft te kijken. Aangeroepen
+ * naast (niet in plaats van) updateInvoiceLogictradeRelevant - deze ene
+ * factuur moet zelf ook nog steeds op 'niet relevant' gezet worden. */
+export async function markSenderDomainIrrelevant(invoiceId, fromAddress, userId, schemaName = DEFAULT_SCHEMA) {
+  const domain = senderDomainOf(fromAddress);
+  if (!domain) return; // geen afzenderadres bekend - niets om te onthouden
+
+  const { error } = await supabase
+    .schema(schemaName)
+    .from('irrelevant_invoice_senders')
+    .upsert(
+      { sender_domain: domain, classified_by: userId || null, source_invoice_id: invoiceId },
+      { onConflict: 'sender_domain', ignoreDuplicates: true }
+    );
+
+  if (error) throw new Error(error.message || 'Kon het afzenderdomein niet onthouden.');
 }
 
 /** Probeert nog niet gekoppelde regels alsnog te koppelen aan de inkooporder.

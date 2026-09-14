@@ -39,12 +39,17 @@ class ParsedInvoiceResult:
     sections: list[ParsedInvoiceSection]
     warnings: list[str] = field(default_factory=list)
     confidence: float = 1.0
+    # Printed totaal zoals letterlijk op de factuur staat (niet de som van de
+    # herkende regels - die kan onvolledig zijn, bv. bij de generieke fallback
+    # in registry.py die geen regels herkent maar wel een totaalbedrag vindt).
+    total_amount: float | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
             "supplier": self.supplier,
             "invoiceNumber": self.invoice_number,
             "invoiceDate": self.invoice_date,
+            "totalAmount": self.total_amount,
             "sections": [
                 {
                     "orderKey": {"type": s.order_key_type, "value": s.order_key_value},

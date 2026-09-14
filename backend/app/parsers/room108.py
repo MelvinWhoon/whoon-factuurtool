@@ -29,6 +29,9 @@ _LINE_ITEM_RE = re.compile(
     r"^(-?\d+,\d{2})\s*st\s+(.+?)\s+€\s*([\d.,]+)\s+€\s*(-?[\d.,]+)\s*$"
 )
 _HEADER_ROW_RE = re.compile(r"^Aantal\s+Omschrijving\s+Stukprijs\s+Bedrag\s*$")
+# Printed totaal onderaan de factuur (bv. "Totaalbedrag € 1.234,56") - los van
+# de som van de herkende regels, als extra controlebasis.
+_TOTAL_RE = re.compile(r"(?:totaalbedrag|totaal)[^\d\-]{0,20}€?\s*(-?[\d.,]+)", re.IGNORECASE)
 
 
 def _parse_nl_money(raw: str) -> float:
@@ -108,6 +111,10 @@ class Room108InvoiceParser(BaseInvoiceParser):
         if not sections:
             warnings.append("Geen 'Ordernummer'-secties gevonden in de factuur.")
 
+        total_amount = None
+        for match in _TOTAL_RE.finditer("\n".join(lines_text)):
+            total_amount = _parse_nl_money(match.group(1))  # laatste treffer wint (eindtotaal staat onderaan)
+
         return ParsedInvoiceResult(
             supplier=self.supplier_key,
             invoice_number=invoice_number,
@@ -115,5 +122,6 @@ class Room108InvoiceParser(BaseInvoiceParser):
             sections=sections,
             warnings=warnings,
             confidence=0.9 if sections else 0.2,
+            total_amount=total_amount,
         )
 
